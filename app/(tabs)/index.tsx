@@ -1,4 +1,4 @@
-import { getTuneReferences } from '@/utils/fakebook';
+import { getTuneReferences, searchFakebook } from '@/utils/fakebook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -285,6 +285,8 @@ export default function GeneratorScreen() {
   const [newTune, setNewTune] = useState('');
   const [newGenreInput, setNewGenreInput] = useState('');
   const [showAddGenre, setShowAddGenre] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [addingToGenre, setAddingToGenre] = useState<string | null>(null);
   const newTuneRef = useRef<TextInput>(null);
   const newGenreRef = useRef<TextInput>(null);
 
@@ -320,6 +322,8 @@ export default function GeneratorScreen() {
   const isAllGenres = selectedGenreId === ALL_GENRES_ID;
   const selectedGenre = data.genres.find((g) => g.id === selectedGenreId) ?? data.genres[0];
   const allTunes = data.genres.flatMap((g) => g.tunes);
+
+  const searchResults = searchFakebook(searchQuery);
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
@@ -393,6 +397,30 @@ export default function GeneratorScreen() {
         },
       },
     ]);
+  }
+
+  function handleSelectSearchResult(tune: string) {
+    const key = data.randomKeyEnabled ? pickRandom(KEYS) : null;
+    setResult({ tune, key });
+    setSearchQuery('');
+    setAddingToGenre(null);
+    setPanel('none');
+  }
+
+  function handleAddToGenre(tune: string, genreId: string) {
+    const genre = data.genres.find((g) => g.id === genreId);
+    if (!genre || genre.tunes.includes(tune)) {
+      setAddingToGenre(null);
+      return;
+    }
+    const updated: AppData = {
+      ...data,
+      genres: data.genres.map((g) =>
+        g.id === genreId ? { ...g, tunes: [...g.tunes, tune] } : g,
+      ),
+    };
+    save(updated);
+    setAddingToGenre(null);
   }
 
   function togglePanel(p: Panel) {
@@ -469,6 +497,64 @@ export default function GeneratorScreen() {
               <Text style={styles.chipAddText}>＋ Genre</Text>
             </Pressable>
           </ScrollView>
+
+          {/* ── Search ── */}
+          <View style={styles.searchRow}>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search all tunes…"
+              placeholderTextColor="#666"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+            />
+          </View>
+          {searchResults.length > 0 && (
+            <View style={styles.searchResults}>
+              {searchResults.map((r, i) => (
+                <View key={`${r.name}-${i}`}>
+                  <View style={styles.searchResultRow}>
+                    <Pressable
+                      style={{ flex: 1 }}
+                      onPress={() => handleSelectSearchResult(r.name)}>
+                      <Text style={styles.searchResultTune}>{r.name}</Text>
+                      {r.refs[0] && (
+                        <Text style={styles.searchResultGenre}>
+                          {r.refs[0].book} p.{r.refs[0].page}
+                        </Text>
+                      )}
+                    </Pressable>
+                    <Pressable
+                      style={styles.addToGenreBtn}
+                      onPress={() =>
+                        setAddingToGenre((prev) =>
+                          prev === r.name ? null : r.name,
+                        )
+                      }>
+                      <Text style={styles.addToGenreBtnText}>＋</Text>
+                    </Pressable>
+                  </View>
+                  {addingToGenre === r.name && (
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={styles.genrePickerRow}
+                      contentContainerStyle={styles.genrePickerContent}>
+                      {data.genres.map((g) => (
+                        <Pressable
+                          key={g.id}
+                          style={styles.genrePickerChip}
+                          onPress={() => handleAddToGenre(r.name, g.id)}>
+                          <Text style={styles.genrePickerChipText}>{g.label}</Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
 
           {/* ── Add Genre Inline Input ── */}
           {showAddGenre && (
@@ -804,6 +890,83 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 14,
   },
+
+  // Search
+  searchRow: {
+    marginTop: 12,
+  },
+  searchInput: {
+    backgroundColor: '#1E1E1E',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    color: '#F5F5F5',
+    fontSize: 15,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  searchResults: {
+    marginTop: 6,
+    backgroundColor: '#141414',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+    overflow: 'hidden',
+  },
+  searchResultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: '#222',
+  },
+  searchResultTune: {
+    color: '#DDD',
+    fontSize: 15,
+    flex: 1,
+  },
+  searchResultGenre: {
+    color: '#555',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  addToGenreBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginLeft: 8,
+  },
+  addToGenreBtnText: {
+    color: '#818CF8',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  genrePickerRow: {
+    borderTopWidth: 1,
+    borderTopColor: '#222',
+    backgroundColor: '#0D0D0D',
+  },
+  genrePickerContent: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
+    flexDirection: 'row',
+  },
+  genrePickerChip: {
+    backgroundColor: '#1E1E1E',
+    borderWidth: 1,
+    borderColor: '#4F46E5',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  genrePickerChipText: {
+    color: '#818CF8',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
   refText: {
     color: '#6B7280',
     fontSize: 12,
