@@ -1,3 +1,4 @@
+import { getTuneReferences } from '@/utils/fakebook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -520,6 +521,9 @@ export default function GeneratorScreen() {
           {result && (
             <View style={styles.resultCard}>
               <Text style={styles.resultTune}>{result.tune}</Text>
+              {getTuneReferences(result.tune).slice(0, 3).map((ref, i) => (
+                <Text key={i} style={styles.refText}>{ref.book}  p.{ref.page}</Text>
+              ))}
               {data.randomKeyEnabled && (
                 <View style={styles.keyRow}>
                   <Text style={styles.resultKey}>
@@ -799,6 +803,12 @@ const styles = StyleSheet.create({
     color: '#818CF8',
     fontWeight: '700',
     fontSize: 14,
+  },
+  refText: {
+    color: '#6B7280',
+    fontSize: 12,
+    marginTop: 6,
+    textAlign: 'center',
   },
 
   // Secondary buttons
