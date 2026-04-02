@@ -3,7 +3,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -286,9 +288,25 @@ export default function GeneratorScreen() {
   const [newGenreInput, setNewGenreInput] = useState('');
   const [showAddGenre, setShowAddGenre] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [addingToGenre, setAddingToGenre] = useState<string | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [selectedGenresForAdd, setSelectedGenresForAdd] = useState<string[]>([]);
+  const [newGenreInModal, setNewGenreInModal] = useState('');
+  const [snackbarMsg, setSnackbarMsg] = useState('');
+  const snackbarOpacity = useRef(new Animated.Value(0)).current;
   const newTuneRef = useRef<TextInput>(null);
   const newGenreRef = useRef<TextInput>(null);
+  const newGenreModalRef = useRef<TextInput>(null);
+
+  // ── Snackbar ──────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!snackbarMsg) return;
+    Animated.sequence([
+      Animated.timing(snackbarOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.delay(2000),
+      Animated.timing(snackbarOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start(() => setSnackbarMsg(''));
+  }, [snackbarMsg]);
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
@@ -403,24 +421,53 @@ export default function GeneratorScreen() {
     const key = data.randomKeyEnabled ? pickRandom(KEYS) : null;
     setResult({ tune, key });
     setSearchQuery('');
-    setAddingToGenre(null);
     setPanel('none');
   }
 
-  function handleAddToGenre(tune: string, genreId: string) {
-    const genre = data.genres.find((g) => g.id === genreId);
-    if (!genre || genre.tunes.includes(tune)) {
-      setAddingToGenre(null);
+  function handleOpenAddModal() {
+    setSelectedGenresForAdd([]);
+    setNewGenreInModal('');
+    setShowAddModal(true);
+  }
+
+  function handleToggleGenreForAdd(id: string) {
+    setSelectedGenresForAdd((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
+  function handleAddNewGenreInModal() {
+    const label = newGenreInModal.trim();
+    if (!label) return;
+    const id = `custom_${Date.now()}`;
+    const updated: AppData = {
+      ...data,
+      genres: [...data.genres, { id, label, tunes: [] }],
+    };
+    save(updated);
+    setNewGenreInModal('');
+    setSelectedGenresForAdd((prev) => [...prev, id]);
+  }
+
+  function handleConfirmAddToGenres() {
+    if (!result || selectedGenresForAdd.length === 0) {
+      setShowAddModal(false);
       return;
     }
     const updated: AppData = {
       ...data,
       genres: data.genres.map((g) =>
-        g.id === genreId ? { ...g, tunes: [...g.tunes, tune] } : g,
+        selectedGenresForAdd.includes(g.id) && !g.tunes.includes(result.tune)
+          ? { ...g, tunes: [...g.tunes, result.tune] }
+          : g,
       ),
     };
     save(updated);
-    setAddingToGenre(null);
+    const labels = selectedGenresForAdd
+      .map((id) => data.genres.find((g) => g.id === id)?.label ?? id)
+      .join(', ');
+    setSnackbarMsg(`Added to ${labels}`);
+    setShowAddModal(false);
   }
 
   function togglePanel(p: Panel) {
@@ -513,45 +560,17 @@ export default function GeneratorScreen() {
           {searchResults.length > 0 && (
             <View style={styles.searchResults}>
               {searchResults.map((r, i) => (
-                <View key={`${r.name}-${i}`}>
-                  <View style={styles.searchResultRow}>
-                    <Pressable
-                      style={{ flex: 1 }}
-                      onPress={() => handleSelectSearchResult(r.name)}>
-                      <Text style={styles.searchResultTune}>{r.name}</Text>
-                      {r.refs[0] && (
-                        <Text style={styles.searchResultGenre}>
-                          {r.refs[0].book} p.{r.refs[0].page}
-                        </Text>
-                      )}
-                    </Pressable>
-                    <Pressable
-                      style={styles.addToGenreBtn}
-                      onPress={() =>
-                        setAddingToGenre((prev) =>
-                          prev === r.name ? null : r.name,
-                        )
-                      }>
-                      <Text style={styles.addToGenreBtnText}>＋</Text>
-                    </Pressable>
-                  </View>
-                  {addingToGenre === r.name && (
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      style={styles.genrePickerRow}
-                      contentContainerStyle={styles.genrePickerContent}>
-                      {data.genres.map((g) => (
-                        <Pressable
-                          key={g.id}
-                          style={styles.genrePickerChip}
-                          onPress={() => handleAddToGenre(r.name, g.id)}>
-                          <Text style={styles.genrePickerChipText}>{g.label}</Text>
-                        </Pressable>
-                      ))}
-                    </ScrollView>
+                <Pressable
+                  key={`${r.name}-${i}`}
+                  style={styles.searchResultRow}
+                  onPress={() => handleSelectSearchResult(r.name)}>
+                  <Text style={styles.searchResultTune}>{r.name}</Text>
+                  {r.refs[0] && (
+                    <Text style={styles.searchResultGenre}>
+                      {r.refs[0].book} p.{r.refs[0].page}
+                    </Text>
                   )}
-                </View>
+                </Pressable>
               ))}
             </View>
           )}
@@ -620,6 +639,9 @@ export default function GeneratorScreen() {
                   </Pressable>
                 </View>
               )}
+              <Pressable style={styles.addToGenreCardBtn} onPress={handleOpenAddModal}>
+                <Text style={styles.addToGenreCardBtnText}>＋ Add to Genre</Text>
+              </Pressable>
             </View>
           )}
 
@@ -687,9 +709,12 @@ export default function GeneratorScreen() {
                   <Text style={styles.emptyText}>No tunes in any genre yet.</Text>
                 ) : (
                   allTunes.map((tune, i) => (
-                    <View key={`${tune}-${i}`} style={styles.tuneRow}>
+                    <Pressable
+                      key={`${tune}-${i}`}
+                      style={styles.tuneRow}
+                      onPress={() => handleSelectSearchResult(tune)}>
                       <Text style={styles.tuneName}>{tune}</Text>
-                    </View>
+                    </Pressable>
                   ))
                 )
               ) : !selectedGenre || selectedGenre.tunes.length === 0 ? (
@@ -697,7 +722,9 @@ export default function GeneratorScreen() {
               ) : (
                 selectedGenre.tunes.map((tune) => (
                   <View key={tune} style={styles.tuneRow}>
-                    <Text style={styles.tuneName}>{tune}</Text>
+                    <Pressable style={{ flex: 1 }} onPress={() => handleSelectSearchResult(tune)}>
+                      <Text style={styles.tuneName}>{tune}</Text>
+                    </Pressable>
                     <Pressable
                       style={styles.deleteBtn}
                       onPress={() => handleDeleteTune(tune)}>
@@ -712,6 +739,76 @@ export default function GeneratorScreen() {
           <View style={{ height: 40 }} />
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* ── Add to Genre Modal ── */}
+      <Modal
+        visible={showAddModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowAddModal(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowAddModal(false)}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <Text style={styles.modalTitle}>Add to Genre</Text>
+            <Text style={styles.modalTuneName}>{result?.tune}</Text>
+
+            <ScrollView style={styles.genreList} showsVerticalScrollIndicator={false}>
+              {data.genres.map((g) => {
+                const selected = selectedGenresForAdd.includes(g.id);
+                return (
+                  <Pressable
+                    key={g.id}
+                    style={[styles.genreCheckRow, selected && styles.genreCheckRowSelected]}
+                    onPress={() => handleToggleGenreForAdd(g.id)}>
+                    <Text style={[styles.genreCheckLabel, selected && styles.genreCheckLabelSelected]}>
+                      {g.label}
+                    </Text>
+                    {selected && <Text style={styles.genreCheckMark}>✓</Text>}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
+            <View style={styles.modalNewGenreRow}>
+              <TextInput
+                ref={newGenreModalRef}
+                style={styles.modalInput}
+                placeholder="New genre…"
+                placeholderTextColor="#666"
+                value={newGenreInModal}
+                onChangeText={setNewGenreInModal}
+                returnKeyType="done"
+                onSubmitEditing={handleAddNewGenreInModal}
+              />
+              <Pressable style={styles.modalCreateBtn} onPress={handleAddNewGenreInModal}>
+                <Text style={styles.modalCreateBtnText}>Create</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.modalActions}>
+              <Pressable style={styles.modalCancelBtn} onPress={() => setShowAddModal(false)}>
+                <Text style={styles.modalCancelBtnText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.modalConfirmBtn,
+                  selectedGenresForAdd.length === 0 && styles.modalConfirmBtnDisabled,
+                ]}
+                onPress={handleConfirmAddToGenres}>
+                <Text style={styles.modalConfirmBtnText}>
+                  Add{selectedGenresForAdd.length > 0 ? ` (${selectedGenresForAdd.length})` : ''}
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Snackbar ── */}
+      {!!snackbarMsg && (
+        <Animated.View style={[styles.snackbar, { opacity: snackbarOpacity }]}>
+          <Text style={styles.snackbarText}>{snackbarMsg}</Text>
+        </Animated.View>
+      )}
     </SafeAreaView>
   );
 }
@@ -890,6 +987,19 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 14,
   },
+  addToGenreCardBtn: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#4F46E5',
+    borderRadius: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 9,
+  },
+  addToGenreCardBtnText: {
+    color: '#818CF8',
+    fontWeight: '700',
+    fontSize: 14,
+  },
 
   // Search
   searchRow: {
@@ -932,39 +1042,148 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
-  addToGenreBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginLeft: 8,
+
+  // Modal
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
   },
-  addToGenreBtnText: {
-    color: '#818CF8',
+  modalCard: {
+    backgroundColor: '#1A1A2E',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxHeight: '80%',
+    borderWidth: 1,
+    borderColor: '#2D2B5F',
+  },
+  modalTitle: {
+    color: '#F5F5F5',
     fontSize: 20,
-    fontWeight: '700',
+    fontWeight: '800',
+    marginBottom: 4,
   },
-  genrePickerRow: {
-    borderTopWidth: 1,
-    borderTopColor: '#222',
-    backgroundColor: '#0D0D0D',
+  modalTuneName: {
+    color: '#818CF8',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 16,
   },
-  genrePickerContent: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
+  genreList: {
+    maxHeight: 220,
+    marginBottom: 16,
+  },
+  genreCheckRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    marginBottom: 4,
+    backgroundColor: '#141428',
+    borderWidth: 1,
+    borderColor: '#2A2A4A',
   },
-  genrePickerChip: {
-    backgroundColor: '#1E1E1E',
+  genreCheckRowSelected: {
+    backgroundColor: '#2D2B5F',
+    borderColor: '#4F46E5',
+  },
+  genreCheckLabel: {
+    color: '#AAA',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  genreCheckLabelSelected: {
+    color: '#FFF',
+  },
+  genreCheckMark: {
+    color: '#818CF8',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  modalNewGenreRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 20,
+  },
+  modalInput: {
+    flex: 1,
+    backgroundColor: '#0D0D1A',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    color: '#F5F5F5',
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  modalCreateBtn: {
+    backgroundColor: '#2A2A4A',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#4F46E5',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
   },
-  genrePickerChipText: {
+  modalCreateBtnText: {
     color: '#818CF8',
-    fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: '#1E1E1E',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  modalCancelBtnText: {
+    color: '#888',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  modalConfirmBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: '#4F46E5',
+  },
+  modalConfirmBtnDisabled: {
+    opacity: 0.4,
+  },
+  modalConfirmBtnText: {
+    color: '#FFF',
+    fontWeight: '800',
+    fontSize: 15,
+  },
+
+  // Snackbar
+  snackbar: {
+    position: 'absolute',
+    bottom: 36,
+    left: 24,
+    right: 24,
+    backgroundColor: '#22C55E',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
+  snackbarText: {
+    color: '#FFF',
+    fontWeight: '700',
+    fontSize: 15,
   },
 
   refText: {
